@@ -8,14 +8,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 
 from .. import config
 from ..ev.engine import ev as compute_ev
 from ..ev.engine import two_sided_probs as _two_sided
-from ..model.poisson import predict_markets
+from ..model.poisson import ModelParams, predict_markets
 from ..store import db as store_db
 from . import generator as gen
 
@@ -83,15 +83,22 @@ def run_simulation(
     handicap: float | None = None,
     db_path: str | None = None,
     threshold: float | None = None,
+    true_dispersion: float | None = None,
+    model_dispersion: float | None = None,
 ) -> SimResult:
     """N경기를 시뮬레이션하고 검증용 레코드를 반환한다.
 
     db_path 지정 시 teams/games/odds/predictions/results 를 SQLite 에 적재한다.
+    true_dispersion: 실제 스코어 생성 시 과대분산(음이항) 모수. None=Poisson.
+    model_dispersion: 모델/시장 예측이 쓰는 과대분산 모수. None=Poisson.
     """
     ou_line = config.DEFAULT_OU_LINE if ou_line is None else ou_line
     handicap = config.DEFAULT_HANDICAP if handicap is None else handicap
     threshold = config.EV_THRESHOLD if threshold is None else threshold
     vig = config.DEFAULT_VIG
+
+    # 모델/시장 예측에 쓸 파라미터(과대분산 모수만 덮어쓴다).
+    params = replace(ModelParams.from_config(), dispersion=model_dispersion)
 
     rng = np.random.default_rng(seed)
     league = gen.make_league(rng)
@@ -111,14 +118,14 @@ def run_simulation(
 
         # 진짜 λ → 실제 스코어
         true_lh, true_la = gen.true_lambdas(game)
-        home, away = gen.simulate_result(true_lh, true_la, rng)
+        home, away = gen.simulate_result(true_lh, true_la, rng, true_dispersion)
 
         # 모델 예측 (추정오차 포함 입력)
-        model_pred = predict_markets(gen.model_view(game, rng), ou_line, handicap)
+        model_pred = predict_markets(gen.model_view(game, rng), ou_line, handicap, params)
         model_probs = _two_sided(model_pred)
 
         # 시장 예측 (피로 blind spot) → 배당
-        market_pred = predict_markets(gen.market_view(game, rng), ou_line, handicap)
+        market_pred = predict_markets(gen.market_view(game, rng), ou_line, handicap, params)
         market_probs = _two_sided(market_pred)
         odds = {k: _odds_from_prob(p, vig) for k, p in market_probs.items()}
 

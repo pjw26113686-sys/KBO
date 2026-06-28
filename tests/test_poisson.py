@@ -75,3 +75,34 @@ def test_prediction_interval_brackets_mean():
     mean_total = pred["lam_home"] + pred["lam_away"]
     assert lo <= mean_total <= hi
     assert lo < hi
+
+
+# --- 음이항(과대분산) ---------------------------------------------------------
+def test_nbinom_distribution_sums_to_one():
+    pmf = P.score_distribution(4.5, dispersion=8.0)
+    assert abs(pmf.sum() - 1.0) < 1e-9
+    assert (pmf >= 0).all()
+
+
+def test_nbinom_large_r_approaches_poisson():
+    """r 가 매우 크면 음이항 ≈ Poisson."""
+    pois = P.score_distribution(4.5)
+    nb = P.score_distribution(4.5, dispersion=100000.0)
+    assert np.max(np.abs(pois - nb)) < 1e-3
+
+
+def test_nbinom_wider_than_poisson():
+    """과대분산이면 총득점 예측구간이 Poisson 보다 넓다."""
+    pois = P.prediction_interval(4.5, 4.0)["total"]
+    nb = P.prediction_interval(4.5, 4.0, dispersion=6.0)["total"]
+    assert (nb[1] - nb[0]) > (pois[1] - pois[0])
+
+
+def test_predict_markets_with_dispersion_params():
+    from kbo.model.poisson import ModelParams
+    from dataclasses import replace
+
+    params = replace(ModelParams.from_config(), dispersion=8.0)
+    pred = P.predict_markets(_neutral_features(), params=params)
+    for mk in ("WIN", "OU", "HDC"):
+        assert 0.0 <= pred[mk] <= 1.0

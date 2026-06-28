@@ -89,6 +89,29 @@ python -m pytest tests/ -q
 5단계 백테스트 통과가 GO/NO-GO 분기점이다. 미통과 시 EV 엔진을 비활성
 (`config.EV_ENGINE_ENABLED=False`)하여 실전 신호 발송을 막는다.
 
+## 3차 구현 (완료): 과대분산 음이항 모델 (설계서 §4 Step2)
+
+실제 야구 득점은 **과대분산**(분산 > 평균)이라 Poisson 으로는 꼬리가 짧다.
+`ModelParams.dispersion`(음이항 모수 r)을 주면 음이항 분포로 교체된다(None=Poisson).
+
+시뮬레이터로 그 효과를 직접 확인할 수 있다:
+
+```bash
+# 실제=과대분산(r=8), 모델=Poisson (불일치) → 예측구간 과소커버
+python scripts/simulate.py --games 3000 --seed 42 --true-dispersion 8
+
+# 실제=과대분산(r=8), 모델=음이항(r=8) (일치) → 커버리지 회복
+python scripts/simulate.py --games 3000 --seed 42 --true-dispersion 8 --model-dispersion 8
+```
+
+| 시나리오 | 총득점 커버리지 | Brier | Log-loss |
+|---|---|---|---|
+| 실제 과대분산, 모델 Poisson | **0.75** (과소커버 ⚠️) | 0.239 | 0.671 |
+| 실제 과대분산, 모델 음이항 | **0.85** (정상) | 0.237 | 0.666 |
+
+> 과소커버는 위험한 방향(구간이 좁아 실제 결과가 자주 벗어남)이다.
+> 음이항이 이를 바로잡고 캘리브레이션도 개선한다. 기본값(Poisson)은 1차와 동일.
+
 ## 2차 구현 (완료): 모델 신뢰화 + 실전 워크플로우
 
 - **파라미터 튜닝**(`model/tuning.py`) + **워크포워드 백테스트**(`backtest/walk_forward.py`):
@@ -102,10 +125,10 @@ python -m pytest tests/ -q
 > 신뢰도 게이트: 디스코드 발송은 기본 **드라이런**(stdout). 실제 웹훅 발송은
 > 백테스트 통과 + 명시적 webhook URL 지정 시에만.
 
-## 다음 단계 (3차)
+## 다음 단계 (4차)
 
 - 실제 Statiz/KBO/MyKBO 크롤링 (외부망 허용 환경에서, robots.txt·rate-limit 준수).
   현재 `crawler/mykbo.py` 는 셀렉터 미검증 스켈레톤 — 라이브 HTML 보고 로컬 완성 필요.
-- 과거 시즌 실데이터 적재 → 실데이터 기반 튜닝
+- 과거 시즌 실데이터 적재 → 실데이터 기반 튜닝(분산 추정 → dispersion 자동 결정)
 - 실제 디스코드 웹훅 발송 활성화
-- 날씨·음이항 분포·ML 고도화
+- 날씨 보정·ML 고도화

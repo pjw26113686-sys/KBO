@@ -119,11 +119,22 @@ def make_game(game_id: int, league: list[Team],
     )
 
 
+def _draw_score(lam: float, rng: np.random.Generator,
+                dispersion: float | None) -> int:
+    """진짜 λ로부터 한 팀 득점을 추출. dispersion 이 있으면 음이항(과대분산)."""
+    if dispersion is None:
+        return int(rng.poisson(lam))
+    # 평균 lam, 분산 lam + lam^2/r 가 되도록 NB 모수화.
+    p = dispersion / (dispersion + lam)
+    return int(rng.negative_binomial(dispersion, p))
+
+
 def simulate_result(lam_home: float, lam_away: float,
-                    rng: np.random.Generator) -> tuple[int, int]:
+                    rng: np.random.Generator,
+                    dispersion: float | None = None) -> tuple[int, int]:
     """진짜 λ로부터 실제 스코어를 추출한다. 동점이면 연장 1점으로 승부 결정."""
-    h = int(rng.poisson(lam_home))
-    a = int(rng.poisson(lam_away))
+    h = _draw_score(lam_home, rng, dispersion)
+    a = _draw_score(lam_away, rng, dispersion)
     if h == a:  # 야구는 무승부가 드물다 → 연장 가정, 50:50 승부.
         if rng.random() < 0.5:
             h += 1

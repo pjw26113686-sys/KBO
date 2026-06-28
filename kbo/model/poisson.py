@@ -15,17 +15,32 @@ from dataclasses import dataclass
 import numpy as np
 
 try:
+    from scipy.stats import nbinom as _sp_nbinom
     from scipy.stats import poisson as _sp_poisson
 
     def _poisson_pmf(k: np.ndarray, lam: float) -> np.ndarray:
         return _sp_poisson.pmf(k, lam)
 
+    def _nbinom_pmf(k: np.ndarray, lam: float, r: float) -> np.ndarray:
+        # 평균 lam, 분산 lam + lam^2/r 가 되도록 모수화 (r→∞ 이면 Poisson).
+        p = r / (r + lam)
+        return _sp_nbinom.pmf(k, r, p)
+
 except ImportError:  # pragma: no cover - scipy 미설치 fallback
-    from math import exp, lgamma
+    from math import lgamma
 
     def _poisson_pmf(k: np.ndarray, lam: float) -> np.ndarray:
         k = np.asarray(k, dtype=float)
         log_pmf = k * np.log(lam) - lam - np.array([lgamma(int(x) + 1) for x in k])
+        return np.exp(log_pmf)
+
+    def _nbinom_pmf(k: np.ndarray, lam: float, r: float) -> np.ndarray:
+        k = np.asarray(k, dtype=float)
+        p = r / (r + lam)
+        log_pmf = (
+            np.array([lgamma(x + r) - lgamma(r) - lgamma(x + 1) for x in k])
+            + r * np.log(p) + k * np.log(1 - p)
+        )
         return np.exp(log_pmf)
 
 
@@ -74,6 +89,8 @@ class ModelParams:
     league_avg_woba: float
     woba_scale: float
     lambda_clip: tuple[float, float]
+    # 득점분포 과대분산 모수 r (None 이면 Poisson). 작을수록 분산↑.
+    dispersion: float | None = None
 
     @classmethod
     def from_config(cls) -> "ModelParams":
@@ -88,6 +105,7 @@ class ModelParams:
             league_avg_woba=config.LEAGUE_AVG_WOBA,
             woba_scale=config.WOBA_SCALE,
             lambda_clip=config.LAMBDA_MULTIPLIER_CLIP,
+            dispersion=config.MODEL_DISPERSION,
         )
 
 
@@ -157,34 +175,38 @@ def estimate_lambda(f: GameFeatures,
 # ---------------------------------------------------------------------------
 # 분포
 # ---------------------------------------------------------------------------
-def score_distribution(lam: float, max_runs: int | None = None) -> np.ndarray:
-    """0..max_runs 득점에 대한 Poisson PMF 벡터 (절단 후 재정규화)."""
+def score_distribution(lam: float, max_runs: int | None = None,
+                       dispersion: float | None = None) -> np.ndarray:
+    """0..max_runs 득점 분포 벡터 (절단 후 재정규화).
+
+    dispersion=None 이면 Poisson, 값이 있으면 음이항(과대분산, 설계서 §4 Step2).
+    """
     max_runs = config.MAX_RUNS if max_runs is None else max_runs
     k = np.arange(0, max_runs + 1)
-    pmf = _poisson_pmf(k, lam)
+    pmf = _poisson_pmf(k, lam) if dispersion is None else _nbinom_pmf(k, lam, dispersion)
     return pmf / pmf.sum()
 
 
-def _joint(lam_home: float, lam_away: float,
-           max_runs: int | None = None) -> np.ndarray:
+def _joint(lam_home: float, lam_away: float, max_runs: int | None = None,
+           dispersion: float | None = None) -> np.ndarray:
     """joint[i, j] = P(home=i, away=j). 두 팀 득점 독립 가정."""
-    ph = score_distribution(lam_home, max_runs)
-    pa = score_distribution(lam_away, max_runs)
+    ph = score_distribution(lam_home, max_runs, dispersion)
+    pa = score_distribution(lam_away, max_runs, dispersion)
     return np.outer(ph, pa)
 
 
-def total_distribution(lam_home: float, lam_away: float,
-                       max_runs: int | None = None) -> np.ndarray:
+def total_distribution(lam_home: float, lam_away: float, max_runs: int | None = None,
+                       dispersion: float | None = None) -> np.ndarray:
     """총득점 t = home+away 의 분포. 인덱스 = 총득점."""
-    ph = score_distribution(lam_home, max_runs)
-    pa = score_distribution(lam_away, max_runs)
+    ph = score_distribution(lam_home, max_runs, dispersion)
+    pa = score_distribution(lam_away, max_runs, dispersion)
     return np.convolve(ph, pa)
 
 
-def diff_distribution(lam_home: float, lam_away: float,
-                      max_runs: int | None = None):
+def diff_distribution(lam_home: float, lam_away: float, max_runs: int | None = None,
+                      dispersion: float | None = None):
     """점수차 d = home-away 분포. (support, pmf) 반환. support는 -max..max."""
-    joint = _joint(lam_home, lam_away, max_runs)
+    joint = _joint(lam_home, lam_away, max_runs, dispersion)
     n = joint.shape[0] - 1
     support = np.arange(-n, n + 1)
     # joint[i, j] 에서 d = i - j. np.trace(joint, offset=-d) 가 해당 대각 합.
@@ -195,24 +217,27 @@ def diff_distribution(lam_home: float, lam_away: float,
 # ---------------------------------------------------------------------------
 # 3종 마켓 확률
 # ---------------------------------------------------------------------------
-def p_home_win(lam_home: float, lam_away: float) -> float:
+def p_home_win(lam_home: float, lam_away: float,
+               dispersion: float | None = None) -> float:
     """P(home 승). 무승부(연장)는 50:50으로 분배."""
-    joint = _joint(lam_home, lam_away)
+    joint = _joint(lam_home, lam_away, dispersion=dispersion)
     p_win = np.tril(joint, k=-1).sum()   # home > away
     p_tie = np.trace(joint)              # home == away
     return float(p_win + 0.5 * p_tie)
 
 
-def p_over(lam_home: float, lam_away: float, line: float) -> float:
+def p_over(lam_home: float, lam_away: float, line: float,
+           dispersion: float | None = None) -> float:
     """P(총득점 > line). line은 보통 .5 단위라 동점 라인 없음."""
-    total = total_distribution(lam_home, lam_away)
+    total = total_distribution(lam_home, lam_away, dispersion=dispersion)
     idx = np.arange(len(total))
     return float(total[idx > line].sum())
 
 
-def p_handicap(lam_home: float, lam_away: float, handicap: float) -> float:
+def p_handicap(lam_home: float, lam_away: float, handicap: float,
+               dispersion: float | None = None) -> float:
     """P(home_score - away_score > handicap). 예: handicap=-1.5 → 홈 -1.5 커버."""
-    support, pmf = diff_distribution(lam_home, lam_away)
+    support, pmf = diff_distribution(lam_home, lam_away, dispersion=dispersion)
     return float(pmf[support > handicap].sum())
 
 
@@ -232,16 +257,17 @@ def _central_interval(support: np.ndarray, pmf: np.ndarray,
 
 
 def prediction_interval(lam_home: float, lam_away: float,
-                        level: float | None = None) -> dict:
+                        level: float | None = None,
+                        dispersion: float | None = None) -> dict:
     """총득점과 점수차의 중심 level% 예측구간을 반환한다.
 
     반환: {"total": (lo, hi), "diff": (lo, hi), "level": level}
     실제 결과가 이 구간에 들어오는 비율을 backtest에서 검증한다.
     """
     level = config.PREDICTION_INTERVAL_LEVEL if level is None else level
-    total = total_distribution(lam_home, lam_away)
+    total = total_distribution(lam_home, lam_away, dispersion=dispersion)
     total_support = np.arange(len(total))
-    diff_support, diff_pmf = diff_distribution(lam_home, lam_away)
+    diff_support, diff_pmf = diff_distribution(lam_home, lam_away, dispersion=dispersion)
     return {
         "total": _central_interval(total_support, total, level),
         "diff": _central_interval(diff_support, diff_pmf, level),
@@ -260,13 +286,14 @@ def predict_markets(f: GameFeatures, ou_line: float | None = None,
     handicap = config.DEFAULT_HANDICAP if handicap is None else handicap
 
     lam_home, lam_away = estimate_lambda(f, params)
+    disp = (params or _default_params()).dispersion
     return {
         "lam_home": lam_home,
         "lam_away": lam_away,
-        "WIN": p_home_win(lam_home, lam_away),
-        "OU": p_over(lam_home, lam_away, ou_line),
-        "HDC": p_handicap(lam_home, lam_away, handicap),
+        "WIN": p_home_win(lam_home, lam_away, disp),
+        "OU": p_over(lam_home, lam_away, ou_line, disp),
+        "HDC": p_handicap(lam_home, lam_away, handicap, disp),
         "ou_line": ou_line,
         "handicap": handicap,
-        "interval": prediction_interval(lam_home, lam_away),
+        "interval": prediction_interval(lam_home, lam_away, dispersion=disp),
     }

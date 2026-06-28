@@ -33,6 +33,10 @@ def main() -> None:
     parser.add_argument("--db", type=str, default=None,
                         help="결과 적재 SQLite 경로(미지정 시 적재 안 함)")
     parser.add_argument("--bins", type=int, default=10, help="캘리브레이션 구간 수")
+    parser.add_argument("--true-dispersion", type=float, default=None,
+                        help="실제 스코어 과대분산 모수 r(음이항). 미지정=Poisson")
+    parser.add_argument("--model-dispersion", type=float, default=None,
+                        help="모델 예측 과대분산 모수 r(음이항). 미지정=Poisson")
     args = parser.parse_args()
 
     sim = run_simulation(
@@ -42,6 +46,8 @@ def main() -> None:
         handicap=args.handicap,
         db_path=args.db,
         threshold=args.threshold,
+        true_dispersion=args.true_dispersion,
+        model_dispersion=args.model_dispersion,
     )
     print_report(sim, bins=args.bins)
 
