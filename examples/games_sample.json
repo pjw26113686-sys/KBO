@@ -1,0 +1,66 @@
+{
+  "games": [
+    {
+      "game_id": 1,
+      "home": "두산",
+      "away": "LG",
+      "start_time": "18:30",
+      "stadium": "잠실",
+      "home_sp": "투수X (FIP 3.2, 휴식4일)",
+      "away_sp": "투수Y (FIP 4.8, 연투불펜 경고)",
+      "features": {
+        "home_woba": 0.345,
+        "away_woba": 0.330,
+        "home_sp_fip": 3.20,
+        "away_sp_fip": 4.80,
+        "home_bullpen_fatigue": 0.10,
+        "away_bullpen_fatigue": 0.85,
+        "home_schedule_fatigue": 0.00,
+        "away_schedule_fatigue": 0.30,
+        "park_factor_run": 1.05
+      },
+      "ou_line": 9.5,
+      "handicap": -1.5,
+      "odds": {
+        "WIN_HOME": 1.38,
+        "WIN_AWAY": 2.90,
+        "OU_OVER": 1.80,
+        "OU_UNDER": 1.95,
+        "HDC_HOME": 1.15,
+        "HDC_AWAY": 4.00
+      },
+      "note": "LG 불펜 3일 연투 → 시장이 오버를 저평가(blind spot)"
+    },
+    {
+      "game_id": 2,
+      "home": "KIA",
+      "away": "삼성",
+      "start_time": "18:30",
+      "stadium": "광주",
+      "home_sp": "투수A (FIP 4.1)",
+      "away_sp": "투수B (FIP 4.0)",
+      "features": {
+        "home_woba": 0.332,
+        "away_woba": 0.331,
+        "home_sp_fip": 4.10,
+        "away_sp_fip": 4.00,
+        "home_bullpen_fatigue": 0.20,
+        "away_bullpen_fatigue": 0.20,
+        "home_schedule_fatigue": 0.10,
+        "away_schedule_fatigue": 0.10,
+        "park_factor_run": 1.00
+      },
+      "ou_line": 9.5,
+      "handicap": -1.5,
+      "odds": {
+        "WIN_HOME": 1.85,
+        "WIN_AWAY": 1.95,
+        "OU_OVER": 1.90,
+        "OU_UNDER": 1.90,
+        "HDC_HOME": 1.38,
+        "HDC_AWAY": 2.90
+      },
+      "note": "양 팀 전력 백중세 → 효율적 시장(밸류 없음 예상)"
+    }
+  ]
+}

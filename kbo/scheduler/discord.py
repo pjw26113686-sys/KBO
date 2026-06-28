@@ -41,9 +41,27 @@ def format_message(
     return "\n".join(lines)
 
 
-def send_webhook(webhook_url: str, message: str) -> None:
-    """디스코드 웹훅 발송 — 2차 구현 예정.
+def send(message: str, webhook_url: str | None = None,
+         dry_run: bool = True) -> bool:
+    """메시지를 발송한다.
 
-    TODO(2차): 발송 직전 경기 status(우천취소/시간변경) 재확인 후 POST.
+    dry_run=True(기본): 실제 발송 대신 stdout 에 출력하고 True 반환.
+        신뢰도 게이트 철학상 백테스트 통과 전까지 기본 드라이런을 권장.
+    dry_run=False: webhook_url 로 실제 POST (외부망 차단 환경에선 실패할 수 있음).
     """
-    raise NotImplementedError("디스코드 웹훅 발송은 2차 구현 예정입니다.")
+    if dry_run or not webhook_url:
+        print("----- [디스코드 드라이런] -----")
+        print(message)
+        print("-------------------------------")
+        return True
+
+    import json
+    import urllib.request
+
+    data = json.dumps({"content": message}).encode("utf-8")
+    req = urllib.request.Request(
+        webhook_url, data=data,
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        return 200 <= resp.status < 300

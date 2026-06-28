@@ -1,3 +1,8 @@
 numpy>=1.24
 scipy>=1.10
+apscheduler>=3.10
 pytest>=7.0
+
+# 선택적(크롤러 로컬 사용 시에만 필요):
+#   requests>=2.31
+#   beautifulsoup4>=4.12

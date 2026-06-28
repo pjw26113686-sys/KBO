@@ -2,6 +2,7 @@
 
 from .poisson import (
     GameFeatures,
+    ModelParams,
     estimate_lambda,
     p_handicap,
     p_home_win,
@@ -12,6 +13,7 @@ from .poisson import (
 
 __all__ = [
     "GameFeatures",
+    "ModelParams",
     "estimate_lambda",
     "p_home_win",
     "p_over",

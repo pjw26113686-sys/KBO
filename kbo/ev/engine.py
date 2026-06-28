@@ -27,6 +27,21 @@ class BetCandidate:
     line: float | None = None
 
 
+def two_sided_probs(pred: dict) -> dict[str, float]:
+    """predict_markets 의 home-side 확률(WIN/OU/HDC)을 6개 outcome 확률로 펼친다.
+
+    반환 키: WIN_HOME/WIN_AWAY, OU_OVER/OU_UNDER, HDC_HOME/HDC_AWAY.
+    """
+    return {
+        "WIN_HOME": pred["WIN"],
+        "WIN_AWAY": 1.0 - pred["WIN"],
+        "OU_OVER": pred["OU"],
+        "OU_UNDER": 1.0 - pred["OU"],
+        "HDC_HOME": pred["HDC"],
+        "HDC_AWAY": 1.0 - pred["HDC"],
+    }
+
+
 def fair_odds(model_prob: float) -> float:
     """모델 확률에 대응하는 공정 배당. 1 / p."""
     if model_prob <= 0:

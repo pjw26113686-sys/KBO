@@ -14,6 +14,7 @@ import numpy as np
 
 from .. import config
 from ..ev.engine import ev as compute_ev
+from ..ev.engine import two_sided_probs as _two_sided
 from ..model.poisson import predict_markets
 from ..store import db as store_db
 from . import generator as gen
@@ -52,18 +53,6 @@ class SimResult:
     seed: int
     ou_line: float
     handicap: float
-
-
-def _two_sided(pred: dict) -> dict[str, float]:
-    """predict_markets 의 home-side 확률을 6개 outcome 확률로 펼친다."""
-    return {
-        "WIN_HOME": pred["WIN"],
-        "WIN_AWAY": 1.0 - pred["WIN"],
-        "OU_OVER": pred["OU"],
-        "OU_UNDER": 1.0 - pred["OU"],
-        "HDC_HOME": pred["HDC"],
-        "HDC_AWAY": 1.0 - pred["HDC"],
-    }
 
 
 def _odds_from_prob(prob: float, vig: float) -> float:

@@ -54,57 +54,103 @@ class GameFeatures:
 
 
 # ---------------------------------------------------------------------------
+# 모델 파라미터 (튜닝 대상)
+# ---------------------------------------------------------------------------
+@dataclass
+class ModelParams:
+    """λ 추정에 쓰이는 보정계수 묶음. 그리드서치 튜닝의 대상이다.
+
+    기본값은 config 상수에서 가져오며(from_config), 호출부가 params 를 주지 않으면
+    이 기본값이 쓰여 기존 동작과 동일하다(하위호환).
+    """
+
+    league_avg_runs: float
+    home_advantage: float
+    sp_fip_sensitivity: float
+    lineup_woba_sensitivity: float
+    bullpen_fatigue_sensitivity: float
+    schedule_fatigue_sensitivity: float
+    league_avg_fip: float
+    league_avg_woba: float
+    woba_scale: float
+    lambda_clip: tuple[float, float]
+
+    @classmethod
+    def from_config(cls) -> "ModelParams":
+        return cls(
+            league_avg_runs=config.LEAGUE_AVG_RUNS,
+            home_advantage=config.HOME_ADVANTAGE,
+            sp_fip_sensitivity=config.SP_FIP_SENSITIVITY,
+            lineup_woba_sensitivity=config.LINEUP_WOBA_SENSITIVITY,
+            bullpen_fatigue_sensitivity=config.BULLPEN_FATIGUE_SENSITIVITY,
+            schedule_fatigue_sensitivity=config.SCHEDULE_FATIGUE_SENSITIVITY,
+            league_avg_fip=config.LEAGUE_AVG_FIP,
+            league_avg_woba=config.LEAGUE_AVG_WOBA,
+            woba_scale=config.WOBA_SCALE,
+            lambda_clip=config.LAMBDA_MULTIPLIER_CLIP,
+        )
+
+
+def _default_params() -> ModelParams:
+    return ModelParams.from_config()
+
+
+# ---------------------------------------------------------------------------
 # 보정계수
 # ---------------------------------------------------------------------------
-def _sp_suppression(opp_sp_fip: float) -> float:
+def _sp_suppression(opp_sp_fip: float, p: ModelParams) -> float:
     """상대 선발의 억제력 배수. FIP가 리그평균보다 높을수록 실점 증가(>1)."""
-    rel = opp_sp_fip - config.LEAGUE_AVG_FIP
-    return 1.0 + config.SP_FIP_SENSITIVITY * rel
+    rel = opp_sp_fip - p.league_avg_fip
+    return 1.0 + p.sp_fip_sensitivity * rel
 
 
-def _lineup_strength(woba: float) -> float:
+def _lineup_strength(woba: float, p: ModelParams) -> float:
     """타선 강도 배수. wOBA가 리그평균보다 높을수록 득점 증가(>1)."""
-    rel = (woba - config.LEAGUE_AVG_WOBA) / config.WOBA_SCALE
-    return 1.0 + config.LINEUP_WOBA_SENSITIVITY * rel
+    rel = (woba - p.league_avg_woba) / p.woba_scale
+    return 1.0 + p.lineup_woba_sensitivity * rel
 
 
-def _bullpen_fatigue_adj(opp_bullpen_fatigue: float) -> float:
+def _bullpen_fatigue_adj(opp_bullpen_fatigue: float, p: ModelParams) -> float:
     """상대 불펜 피로 배수. 상대 불펜이 지칠수록 우리 득점 증가(>1)."""
-    return 1.0 + config.BULLPEN_FATIGUE_SENSITIVITY * opp_bullpen_fatigue
+    return 1.0 + p.bullpen_fatigue_sensitivity * opp_bullpen_fatigue
 
 
-def _schedule_fatigue_adj(own_schedule_fatigue: float) -> float:
+def _schedule_fatigue_adj(own_schedule_fatigue: float, p: ModelParams) -> float:
     """자팀 일정 피로 배수. 우리가 지칠수록 우리 득점 감소(<1)."""
-    return 1.0 - config.SCHEDULE_FATIGUE_SENSITIVITY * own_schedule_fatigue
+    return 1.0 - p.schedule_fatigue_sensitivity * own_schedule_fatigue
 
 
-def estimate_lambda(f: GameFeatures) -> tuple[float, float]:
+def estimate_lambda(f: GameFeatures,
+                    params: ModelParams | None = None) -> tuple[float, float]:
     """홈/원정 기대득점 (λ_home, λ_away)를 추정한다 (설계서 §4 Step 1).
 
     λ_home = 리그평균 × 상대선발억제 × 홈타선 × 파크팩터
              × 상대불펜피로 × 홈일정피로 × (1 + 홈어드밴티지)
     λ_away = 동일 구조, 홈어드밴티지 미적용.
+
+    params=None 이면 config 기본 계수를 쓴다(기존 동작과 동일).
     """
-    lo, hi = config.LAMBDA_MULTIPLIER_CLIP
+    p = params or _default_params()
+    lo, hi = p.lambda_clip
 
     home_mult = (
-        _sp_suppression(f.away_sp_fip)
-        * _lineup_strength(f.home_woba)
+        _sp_suppression(f.away_sp_fip, p)
+        * _lineup_strength(f.home_woba, p)
         * f.park_factor_run
-        * _bullpen_fatigue_adj(f.away_bullpen_fatigue)
-        * _schedule_fatigue_adj(f.home_schedule_fatigue)
-        * (1.0 + config.HOME_ADVANTAGE)
+        * _bullpen_fatigue_adj(f.away_bullpen_fatigue, p)
+        * _schedule_fatigue_adj(f.home_schedule_fatigue, p)
+        * (1.0 + p.home_advantage)
     )
     away_mult = (
-        _sp_suppression(f.home_sp_fip)
-        * _lineup_strength(f.away_woba)
+        _sp_suppression(f.home_sp_fip, p)
+        * _lineup_strength(f.away_woba, p)
         * f.park_factor_run
-        * _bullpen_fatigue_adj(f.home_bullpen_fatigue)
-        * _schedule_fatigue_adj(f.away_schedule_fatigue)
+        * _bullpen_fatigue_adj(f.home_bullpen_fatigue, p)
+        * _schedule_fatigue_adj(f.away_schedule_fatigue, p)
     )
 
-    lam_home = config.LEAGUE_AVG_RUNS * float(np.clip(home_mult, lo, hi))
-    lam_away = config.LEAGUE_AVG_RUNS * float(np.clip(away_mult, lo, hi))
+    lam_home = p.league_avg_runs * float(np.clip(home_mult, lo, hi))
+    lam_away = p.league_avg_runs * float(np.clip(away_mult, lo, hi))
     return lam_home, lam_away
 
 
@@ -207,12 +253,13 @@ def prediction_interval(lam_home: float, lam_away: float,
 # 통합 산출
 # ---------------------------------------------------------------------------
 def predict_markets(f: GameFeatures, ou_line: float | None = None,
-                    handicap: float | None = None) -> dict:
+                    handicap: float | None = None,
+                    params: ModelParams | None = None) -> dict:
     """한 경기에 대한 3종 마켓 확률 + 예측구간 + λ를 한 번에 산출한다."""
     ou_line = config.DEFAULT_OU_LINE if ou_line is None else ou_line
     handicap = config.DEFAULT_HANDICAP if handicap is None else handicap
 
-    lam_home, lam_away = estimate_lambda(f)
+    lam_home, lam_away = estimate_lambda(f, params)
     return {
         "lam_home": lam_home,
         "lam_away": lam_away,
