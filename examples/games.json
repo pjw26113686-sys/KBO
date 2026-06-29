@@ -1,0 +1,49 @@
+{
+  "games": [
+    {
+      "game_id": 1,
+      "home": "LG",
+      "away": "두산",
+      "start_time": "18:30",
+      "stadium": "잠실",
+      "note": "두산 불펜 3일 연투, 7회 이후 실점 리스크↑",
+      "ou_line": 8.5,
+      "handicap": -1.5,
+      "features": {
+        "home": {
+          "offense_strength": 1.03,
+          "opp_pitcher_suppression": 1.0,
+          "park_factor": 1.0,
+          "bullpen_fatigue": 1.04,
+          "schedule_fatigue": 1.0
+        },
+        "away": {
+          "offense_strength": 0.99,
+          "opp_pitcher_suppression": 0.98,
+          "park_factor": 1.0,
+          "bullpen_fatigue": 1.0,
+          "schedule_fatigue": 0.99
+        }
+      },
+      "odds": {
+        "HOME": 1.90,
+        "AWAY": 2.05,
+        "OVER": 1.95,
+        "UNDER": 1.88,
+        "HDC_HOME": 2.10,
+        "HDC_AWAY": 1.78
+      }
+    },
+    {
+      "game_id": 2,
+      "home": "KIA",
+      "away": "삼성",
+      "start_time": "18:30",
+      "stadium": "광주",
+      "probs": { "HOME": 0.57, "AWAY": 0.43, "OVER": 0.54, "UNDER": 0.46, "HDC_HOME": 0.47, "HDC_AWAY": 0.53 },
+      "ou_line": 9.0,
+      "handicap": -1.5,
+      "odds": { "HOME": 1.65, "OVER": 1.95, "HDC_AWAY": 1.95 }
+    }
+  ]
+}

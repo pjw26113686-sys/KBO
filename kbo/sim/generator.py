@@ -9,7 +9,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..model.poisson import LEAGUE_AVG_RUNS, TeamMatchupFeatures, expected_runs
+from ..model.params import ModelParams
+from ..model.poisson import TeamMatchupFeatures, expected_runs
 
 
 @dataclass
@@ -30,6 +31,8 @@ class SimGame:
     lam_away_true: float
     home_score: int
     away_score: int
+    home_features: TeamMatchupFeatures
+    away_features: TeamMatchupFeatures
 
 
 def _lognormal(rng: np.random.Generator, sigma: float, size=None) -> np.ndarray | float:
@@ -56,8 +59,10 @@ def make_league(n_teams: int = 10, seed: int = 0) -> list[Team]:
     return teams
 
 
-def _true_lambdas(home: Team, away: Team, rng: np.random.Generator) -> tuple[float, float]:
-    """경기별 진짜 λ. 불펜/일정 피로는 경기마다 난수로 부여(설계서 2장 ★ 변수)."""
+def _true_features(
+    home: Team, away: Team, rng: np.random.Generator
+) -> tuple[TeamMatchupFeatures, TeamMatchupFeatures]:
+    """경기별 진짜 피처. 불펜/일정 피로는 경기마다 난수로 부여(설계서 2장 ★ 변수)."""
     # 불펜 피로(>1 이면 상대 득점 상향), 일정 피로(<1 이면 자팀 득점 하향)
     home_bullpen_fatigue = float(np.clip(rng.normal(1.0, 0.05), 0.85, 1.25))
     away_bullpen_fatigue = float(np.clip(rng.normal(1.0, 0.05), 0.85, 1.25))
@@ -80,21 +85,31 @@ def _true_lambdas(home: Team, away: Team, rng: np.random.Generator) -> tuple[flo
         schedule_fatigue=away_sched,
         is_home=False,
     )
-    return expected_runs(fh), expected_runs(fa)
+    return fh, fa
 
 
-def generate_games(n_games: int, teams: list[Team], seed: int = 1) -> list[SimGame]:
-    """N경기를 생성: 진짜 λ → 실제 스코어 샘플(Poisson(λ_true))."""
+def generate_games(
+    n_games: int,
+    teams: list[Team],
+    seed: int = 1,
+    params: ModelParams | None = None,
+) -> list[SimGame]:
+    """N경기를 생성: 진짜 피처 → 진짜 λ(params 적용) → 실제 스코어 샘플(Poisson(λ_true)).
+
+    params 는 '진짜' 데이터 생성 규칙. 튜닝 데모에서는 모델 기본값과 다른 값을 주어
+    튜너가 이를 회복하는지 본다.
+    """
     rng = np.random.default_rng(seed)
     games: list[SimGame] = []
     n = len(teams)
     for gid in range(n_games):
         i, j = rng.choice(n, size=2, replace=False)
         home, away = teams[i], teams[j]
-        lh, la = _true_lambdas(home, away, rng)
+        fh, fa = _true_features(home, away, rng)
+        lh, la = expected_runs(fh, params), expected_runs(fa, params)
         hs = int(rng.poisson(lh))
         as_ = int(rng.poisson(la))
-        games.append(SimGame(gid, home, away, lh, la, hs, as_))
+        games.append(SimGame(gid, home, away, lh, la, hs, as_, fh, fa))
     return games
 
 

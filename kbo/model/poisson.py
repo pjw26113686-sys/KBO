@@ -9,12 +9,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import numpy as np
-from scipy.stats import nbinom, poisson
+from scipy.stats import nbinom, poisson, skellam
 
-# 리그 평균 팀 득점(경기당). 합성/실데이터 모두 여기를 기준으로 보정계수를 곱한다.
-LEAGUE_AVG_RUNS = 4.6
-# 홈 어드밴티지(득점 곱 보정). 1.0보다 크면 홈 득점 상향.
-HOME_ADVANTAGE = 1.03
+from .params import DEFAULT_PARAMS, ModelParams
+
+# 하위호환용 상수(과거 코드/테스트 참조). 실제 기본값은 ModelParams 에서 온다.
+LEAGUE_AVG_RUNS = DEFAULT_PARAMS.league_avg
+HOME_ADVANTAGE = DEFAULT_PARAMS.home_advantage
 
 
 @dataclass
@@ -33,30 +34,43 @@ class TeamMatchupFeatures:
     is_home: bool = False
 
 
-def expected_runs(f: TeamMatchupFeatures, league_avg: float = LEAGUE_AVG_RUNS) -> float:
-    """단일 팀의 기대득점 λ (설계서 4장 Step1)."""
+def expected_runs(f: TeamMatchupFeatures, params: ModelParams | None = None) -> float:
+    """단일 팀의 기대득점 λ (설계서 4장 Step1). params 의 지수 가중치를 반영."""
+    p = params or DEFAULT_PARAMS
     lam = (
-        league_avg
-        * f.offense_strength
-        * f.opp_pitcher_suppression
-        * f.park_factor
-        * f.bullpen_fatigue
-        * f.schedule_fatigue
+        p.league_avg
+        * f.offense_strength ** p.w_offense
+        * f.opp_pitcher_suppression ** p.w_suppression
+        * f.park_factor ** p.w_park
+        * f.bullpen_fatigue ** p.w_bullpen
+        * f.schedule_fatigue ** p.w_schedule
     )
     if f.is_home:
-        lam *= HOME_ADVANTAGE
+        lam *= p.home_advantage
     return max(lam, 1e-6)
 
 
 def estimate_lambda(
     home: TeamMatchupFeatures,
     away: TeamMatchupFeatures,
-    league_avg: float = LEAGUE_AVG_RUNS,
+    params: ModelParams | None = None,
 ) -> tuple[float, float]:
     """홈/원정 기대득점 (λ_home, λ_away)."""
     home = TeamMatchupFeatures(**{**home.__dict__, "is_home": True})
     away = TeamMatchupFeatures(**{**away.__dict__, "is_home": False})
-    return expected_runs(home, league_avg), expected_runs(away, league_avg)
+    return expected_runs(home, params), expected_runs(away, params)
+
+
+def win_prob(lam_home: float, lam_away: float) -> tuple[float, float, float]:
+    """승/패/무 확률을 Skellam 분포로 빠르게 계산 (튜닝 루프용).
+
+    diff = home - away ~ Skellam(mu1=lam_home, mu2=lam_away).
+    결합표(_joint)보다 훨씬 빠르며 max_runs 절단 오차가 없다.
+    """
+    p_home = float(1.0 - skellam.cdf(0, lam_home, lam_away))   # P(diff >= 1)
+    p_away = float(skellam.cdf(-1, lam_home, lam_away))         # P(diff <= -1)
+    p_draw = float(skellam.pmf(0, lam_home, lam_away))
+    return p_home, p_away, p_draw
 
 
 def score_distribution(
@@ -98,7 +112,7 @@ class MarketProbabilities:
     p_draw: float
     p_over: float           # P(total > ou_line)
     p_under: float
-    p_home_cover: float     # P(home - away > handicap)
+    p_home_cover: float     # P(home + handicap > away) = 홈 핸디 커버
     ou_line: float
     handicap: float
     lam_home: float = field(default=0.0)
@@ -115,7 +129,8 @@ def market_probabilities(
 ) -> MarketProbabilities:
     """세 마켓(승패/오버언더/핸디캡) 확률을 결합표에서 파생 (설계서 4장 Step3).
 
-    handicap 은 홈 기준. 예: -1.5 → 홈이 2점차 이상 이겨야 커버.
+    handicap 은 홈 점수에 더하는 '홈 라인'. 커버 조건: home + handicap > away ⟺ diff > -handicap.
+    예: handicap=-1.5 → 홈이 2점차 이상 이겨야 커버(P(diff>1.5)=P(diff>=2)).
     """
     j = _joint(lam_home, lam_away, max_runs, dist)
     h_idx = np.arange(j.shape[0])[:, None]
@@ -131,7 +146,7 @@ def market_probabilities(
     p_over = float(j[total > ou_line].sum())
     p_under = float(j[total < ou_line].sum())  # total==ou_line(정수선) 은 push로 양쪽 제외
 
-    p_home_cover = float(j[diff > handicap].sum())
+    p_home_cover = float(j[diff > -handicap].sum())  # home + handicap > away
 
     return MarketProbabilities(
         p_home_win=p_home_win,

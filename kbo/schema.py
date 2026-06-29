@@ -99,6 +99,19 @@ CREATE TABLE IF NOT EXISTS predictions (
     ev          REAL,
     captured_at TEXT
 );
+
+-- 모델 입력 피처의 '재료 정제 결과'(설계서 2~4장). pitcher_game/batter_form/bullpen_log/
+-- schedule_load 를 한 경기 단위로 집계한 배수형 피처. DataSource 가 여기서 읽어 λ 를 만든다.
+CREATE TABLE IF NOT EXISTS game_features (
+    game_id              INTEGER,
+    side                 TEXT,        -- HOME / AWAY
+    offense_strength     REAL,
+    opp_suppression      REAL,
+    park_factor          REAL,
+    bullpen_fatigue      REAL,
+    schedule_fatigue     REAL,
+    PRIMARY KEY (game_id, side)
+);
 """
 
 

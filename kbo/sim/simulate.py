@@ -63,10 +63,10 @@ def _settle_ou(home: int, away: int, selection: str, line: float) -> str:
 
 
 def _settle_hdc(home: int, away: int, selection: str, handicap: float) -> str:
-    diff = home - away
-    if diff == handicap:
+    margin = (home - away) + handicap   # 홈 라인을 홈 마진에 더함
+    if margin == 0:
         return "push"
-    cover = diff > handicap
+    cover = margin > 0
     if selection == "HDC_HOME":
         return "win" if cover else "lose"
     return "win" if not cover else "lose"  # HDC_AWAY
@@ -139,9 +139,9 @@ def run(
             res.calib.append(
                 CalibRow("OU", p_over, int((g.home_score + g.away_score) > mk.ou_line))
             )
-        if "HDC" in markets and (g.home_score - g.away_score) != handicap:
+        if "HDC" in markets and ((g.home_score - g.away_score) + handicap) != 0:
             res.calib.append(
-                CalibRow("HDC", p_cover, int((g.home_score - g.away_score) > handicap))
+                CalibRow("HDC", p_cover, int(((g.home_score - g.away_score) + handicap) > 0))
             )
 
         # --- EV 후보 선정 및 정산 ---

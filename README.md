@@ -15,8 +15,10 @@ KBO 경기의 **승패 / 오버언더 / 핸디캡**을 포아송 모델로 예�
 
 ```bash
 pip install -r requirements.txt
-pytest                                  # 15개 테스트 (핵심 가설 3종 포함)
-python -m scripts.run_simulation --n 3000 --seed 42 --plot
+pytest                                          # 25개 테스트
+python -m scripts.run_simulation --n 3000 --seed 42 --plot   # 합성 백테스트 리포트
+python -m scripts.tune_model --n 4000 --seed 42              # 파라미터 튜닝 데모
+python -m scripts.ev_report --input examples/games.json      # 수동 배당 → EV 리포트
 ```
 
 `--plot` 을 주면 `output/calibration.png`, `output/bankroll.png` 가 생성된다.
@@ -57,18 +59,45 @@ python -m scripts.run_simulation --n 3000 --seed 42 --plot
 
 ```
 kbo/
-├── schema.py          # SQLite 스키마 (설계서 3장)
-├── store.py           # DB 연결/적재/조회 (시뮬·실데이터 공용 경로)
-├── model/poisson.py   # λ 추정 + 득점분포(Poisson/음이항) + 3종 마켓 확률 (설계서 4장)
-├── ev/engine.py       # 공정배당 → EV → 후보 필터 (설계서 5장, 실전·시뮬 공용)
-├── sim/
-│   ├── generator.py   # 합성 리그/진실 λ/실제 스코어 생성
-│   ├── market.py      # 마진+노이즈 포함 합성 시장 배당
-│   └── simulate.py    # N경기 end-to-end
-└── backtest/metrics.py# log-loss/Brier/캘리브레이션/ROI/엣지 민감도 + 게이트 (설계서 6장)
-scripts/run_simulation.py  # CLI 진입점 (리포트 + PNG)
-tests/                     # pytest (test_ev / test_poisson / test_simulate)
+├── schema.py            # SQLite 스키마 (설계서 3장) + game_features(모델 입력 정제 결과)
+├── store.py             # DB 연결/적재/조회 (시뮬·실데이터 공용 경로)
+├── data/                # 데이터 어댑터 (generator 를 인터페이스 뒤로 숨김)
+│   ├── base.py          #   GameRecord + DataSource ABC
+│   ├── synthetic.py     #   SyntheticDataSource (합성)
+│   └── sqlite_source.py #   SqliteDataSource + save_records (실데이터 토대)
+├── model/
+│   ├── params.py        # ModelParams (튜닝 가능한 λ 계수)
+│   ├── poisson.py       # λ 추정 + 득점분포 + 3종 마켓 확률 + Skellam 승률 (설계서 4장)
+│   └── tuning.py        # 포아송 MLE 파라미터 튜닝 + 홀드아웃 평가 (설계서 4·6장)
+├── ev/
+│   ├── engine.py        # 공정배당 → EV → 후보 필터 (설계서 5장, 실전·시뮬 공용)
+│   └── report.py        # 수동 배당 입력 → EV 후보 → 디스코드 포맷 메시지 (설계서 7장)
+├── sim/                 # 합성 리그/시장/N경기 end-to-end 몬테카를로
+└── backtest/metrics.py  # log-loss/Brier/캘리브레이션/ROI/엣지 민감도 + 게이트 (설계서 6장)
+scripts/
+├── run_simulation.py    # 합성 백테스트 리포트 (+PNG)
+├── tune_model.py        # 파라미터 튜닝 데모
+└── ev_report.py         # 수동 배당 EV 리포트
+examples/games.json      # ev_report 입력 예시
 ```
+
+### 데이터 어댑터 (실데이터 교체 지점)
+모델·튜닝·백테스트는 `generator` 가 아니라 `DataSource` 인터페이스에 의존한다.
+2차에서 크롤러가 raw → 정제 후 `game_features` 테이블에 적재하면,
+`SqliteDataSource` 가 동일 `GameRecord` 를 공급해 **파이프라인 변경 없이** 실데이터로 전환된다.
+
+### 파라미터 튜닝
+`ModelParams` (league_avg, home_advantage, 각 피처 지수 가중치)를 과거 데이터의 득점에 대해
+**포아송 최대우도(MLE)** 로 적합한다(`scripts/tune_model.py`). 합성 데모에서는 진짜 규칙과
+다른 기본값에서 출발해 튜너가 진짜 파라미터를 회복하는지 확인한다.
+> 관측 노이즈(`--feature-noise`)를 키우면 가중치가 0쪽으로 줄어드는 **감쇠(attenuation,
+> errors-in-variables)** 가 나타난다 — 통계적으로 정상이며 일반화 성능은 유지된다.
+
+### 수동 배당 → EV 리포트
+`examples/games.json` 처럼 경기 피처(또는 확률)와 배당을 JSON 으로 넣으면 EV 후보와
+디스코드 포맷 메시지를 출력한다. **자동 스크래핑/발송은 하지 않는다.**
+백테스트 게이트 통과 전에는 `--gate-passed` 없이는 항상 "참고용/비활성" 배너가 강제된다.
+> 핸디캡은 홈 라인(홈 점수에 더함). 예: `-1.5` → 홈이 2점차 이상 이겨야 커버.
 
 ### 핵심 인과 순서 (EV는 입력이 아니라 결과)
 ```
@@ -87,15 +116,19 @@ tests/                     # pytest (test_ev / test_poisson / test_simulate)
 
 ---
 
-## 로드맵 (2차 — 아직 미구현, 의도적 보류)
+## 로드맵
 
-설계서 8단계 순서를 따른다. **백테스트 게이트(5단계) 통과 전에는 6단계 이후로 넘어가지 않는다.**
+설계서 8단계 순서를 따른다. **백테스트 게이트(5단계) 통과 전에는 실전 신호를 발송하지 않는다.**
 
-- [ ] Statiz / KBO공식 크롤러 — `generator` 를 실데이터 로더로 교체 (스키마/인터페이스는 이미 통일됨).
+- [x] 스키마 + SQLite (1단계)
+- [x] 포아송 모델 + 합성 백테스트/게이트 (4·5·6단계)
+- [x] **데이터 어댑터** (`DataSource`) — `generator` 를 인터페이스 뒤로 분리, 실데이터 교체 토대
+- [x] **파라미터 튜닝** (포아송 MLE, `scripts/tune_model.py`)
+- [x] **수동 배당 입력 + EV 리포트** (`scripts/ev_report.py`, 6단계)
+- [ ] Statiz / KBO공식 / MyKBO 크롤러 — 정제 후 `game_features` 적재 (2단계).
       *개인 분석·저빈도·robots.txt 준수 한정, rate limit 2~5초.*
-- [ ] 포아송 보정계수 파라미터 튜닝 (과거 시즌 회귀/그리드서치).
 - [ ] 과거 배당 확보 시 실데이터 ROI 백테스트.
-- [ ] 디스코드 웹훅 + APScheduler (경기 시작 30분 전 발송).
+- [ ] 디스코드 웹훅 + APScheduler (경기 시작 30분 전 발송) — **게이트 통과 후에만** (7단계).
 - [ ] 날씨·ML 고도화, 조합 베팅(상관관계 보정).
 
 > 검증되지 않은 신호 발송 기능은 **의도적으로 만들지 않았다.**
