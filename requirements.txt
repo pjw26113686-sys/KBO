@@ -1,0 +1,5 @@
+numpy>=1.24
+scipy>=1.10
+pandas>=2.0
+matplotlib>=3.7   # 선택: 캘리브레이션 PNG (없으면 텍스트 폴백)
+pytest>=7.0       # 테스트
